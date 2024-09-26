@@ -10,59 +10,58 @@
 module {
   func.func private @printMemrefF32(memref<*xf32>)
 
-  func.func @alloc_2d_filled_f32(%arg0: index, %arg1: index, %arg2: index, %arg3: index, %arg4: f32) -> memref<?x?x?x?xf32> {
-    %c0 = arith.constant 0 : index
-    %c1 = arith.constant 1 : index
-    %0 = memref.alloc(%arg0, %arg1, %arg2, %arg3) : memref<?x?x?x?xf32>
-    scf.for %arg5 = %c0 to %arg0 step %c1 {
-      scf.for %arg6 = %c0 to %arg1 step %c1 {
-        scf.for %arg7 = %c0 to %arg2 step %c1 {
-          scf.for %arg8 = %c0 to %arg3 step %c1 {
-            %iarg8 = arith.index_cast %arg8 : index to i32
-            %loopf = arith.sitofp %iarg8 : i32 to f32
-            memref.store %loopf, %0[%arg5, %arg6, %arg7, %arg8] : memref<?x?x?x?xf32>
-          }
-        }
-      }
-    }
-    return %0 : memref<?x?x?x?xf32>
-  }
-
   // Definition for the batch matrix multiplication function
-  func.func @buddy_batchmatmul_f32(%a: memref<?x?x?xf32>, %b: memref<?x?x?xf32>, %c: memref<?x?x?xf32>) {
+  func.func @buddy_batchmatmul_f32(%A: memref<?x?x?xf32>, %B: memref<?x?x?xf32>, %C: memref<?x?x?xf32>) {
     linalg.batch_matmul 
-      ins(%a, %b: memref<?x?x?xf32>, memref<?x?x?xf32>)
-      outs(%c: memref<?x?x?xf32>)
+      ins(%A, %B: memref<?x?x?xf32>, memref<?x?x?xf32>)
+      outs(%C: memref<?x?x?xf32>)
     return
   }
 
-  func.func @main() {
-    // Constants for matrix dimensions and values
-    %cst = arith.constant 0.500000e+00 : f32
-    %cst_0 = arith.constant 0.000000e+00 : f32
+  func.func @main(){
+      // Set up dims.
+      %cBatch = arith.constant 10:index
+      %cM = arith.constant 2 : index
+      %cN = arith.constant 5 : index
+      %cK = arith.constant 4 : index
 
-    %batch_size = arith.constant 4 : index
-    %mat_m = arith.constant 8 : index
-    %mat_k = arith.constant 6 : index
-    %mat_n = arith.constant 8 : index
+      // Set Init Value.
+      %cf1 = arith.constant 1.0 : f32
+      %cf2 = arith.constant 2.0 : f32
+      %c0 = arith.constant 0.0 : f32
 
-    // Allocate and fill matrices A, B, and C for batch matmul
-    %a = call @alloc_2d_filled_f32(%batch_size, %mat_m, %mat_k, %mat_n, %cst) : (index, index, index, index, f32) -> memref<?x?x?x?xf32>
-    %b = call @alloc_2d_filled_f32(%batch_size, %mat_k, %mat_n, %mat_m, %cst) : (index, index, index, index, f32) -> memref<?x?x?x?xf32>
-    %c = call @alloc_2d_filled_f32(%batch_size, %mat_m, %mat_n, %mat_n, %cst_0) : (index, index, index, index, f32) -> memref<?x?x?x?xf32>
+      %A = memref.alloc(%cBatch,%cM, %cK) : memref<?x?x?xf32>
+      %B = memref.alloc(%cBatch,%cK, %cN) : memref<?x?x?xf32>
+      %C = memref.alloc(%cBatch,%cM, %cN) : memref<?x?x?xf32>
 
-    // Call batch matrix multiplication function
-    call @buddy_batchmatmul_f32(%a, %b, %c) : (memref<?x?x?xf32>, memref<?x?x?xf32>, memref<?x?x?xf32>) -> ()
+      linalg.fill
+      ins(%cf1 : f32)
+      outs(%A:memref<?x?x?xf32>)
 
-    %c_cast = memref.cast %c : memref<?x?x?x?xf32> to memref<*xf32>
+      linalg.fill
+      ins(%cf2 : f32)
+      outs(%B:memref<?x?x?xf32>)
 
-    // Print the result of matrix multiplication
-    call @printMemrefF32(%c_cast) : (memref<*xf32>) -> ()
+      linalg.fill
+      ins(%c0 : f32)
+      outs(%C:memref<?x?x?xf32>)
 
-    // Deallocate memory
-    memref.dealloc %a : memref<?x?x?x?xf32>
-    memref.dealloc %b : memref<?x?x?x?xf32>
-    memref.dealloc %c : memref<?x?x?x?xf32>
-    return
-  }
+      call @buddy_batchmatmul_f32(%A, %B, %C) : (memref<?x?x?xf32>, memref<?x?x?xf32>, memref<?x?x?xf32>) -> ()
+
+      // Print output.
+      // CHECK: Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [4, 4] strides = [4, 1] data =
+      // CHECK-NEXT: [
+      // CHECK-SAME:  [5, 5, 5, 5],
+      // CHECK-NEXT:  [5, 5, 5, 5],
+      // CHECK-NEXT:  [5, 5, 5, 5],
+      // CHECK-NEXT:  [5, 5, 5, 5]
+      // CHECK-SAME: ]
+      %print_C = memref.cast %C : memref<?x?x?xf32> to memref<*xf32>
+      call @printMemrefF32(%print_C) : (memref<*xf32>) -> ()
+
+      memref.dealloc %C : memref<?x?x?xf32>
+      memref.dealloc %B : memref<?x?x?xf32>
+      memref.dealloc %A : memref<?x?x?xf32>
+      return 
+    }
 }
